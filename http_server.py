@@ -2,6 +2,73 @@ import socket
 import sys
 import traceback
 import os
+from io import StringIO
+
+
+def return_py_script(path):
+    """
+    Exec a python script, determine the type of either html or text and output to client
+    """
+    old_stdout = sys.stdout
+    sys.stdout = mystdout = StringIO()
+    exec(open(path).read())
+    sys.stdout = old_stdout
+    content = mystdout.getvalue()
+    if "<http>" in content:
+        mime_type = b"text/html"
+    else:
+        mime_type = b"text/plain"
+    content = content.encode()
+    return content, mime_type
+
+
+def return_directory(path):
+    """
+    If the requested path is a directory, then the content should be a
+    plain-text listing of the contents with mimetype `text/plain`.
+    """
+    files = os.listdir(path)
+    content = ""
+    for file in files:
+        content = content + f"{file}\n"
+    content = content.encode()
+    mime_type = b"text/plain"
+    return content, mime_type
+
+
+def return_file(path):
+    """
+    If the path is a file, it should return the contents of that file
+    and its correct mimetype.
+
+
+    Ex:
+        response_path('/a_web_page.html') -> (b"<html><h1>North Carolina...",
+                                            b"text/html")
+
+        response_path('/images/sample_1.png')
+                        -> (b"A12BCF...",  # contents of sample_1.png
+                            b"image/png")
+
+        response_path('/') -> (b"images/, a_web_page.html, make_type.py,...",
+                             b"text/plain")
+    """
+    file_ext = path.split(".")[1]
+    if file_ext != "py":
+        with open(path, "rb") as file:
+            content = file.read()
+        if file_ext == "txt":
+            mime_type = b"text/plain"
+        elif file_ext == "html" or file_ext == "htm":
+            mime_type = b"text/html"
+        elif file_ext == "png":
+            mime_type = b"image/png"
+        elif file_ext == "jpg":
+            mime_type = b"image/jpeg"
+    else:
+        content, mime_type = return_py_script(path)
+    return content, mime_type
+
 
 def response_ok(body=b"This is a minimal response", mimetype=b"text/plain"):
     """
@@ -19,10 +86,10 @@ def response_ok(body=b"This is a minimal response", mimetype=b"text/plain"):
         <html><h1>Welcome:</h1></html>\r\n
         '''
     """
+    response_ok_string = f'HTTP/1.1 200 OK\r\nContent-Type:{mimetype.decode()}\r\n\r\n'
+    response_ok_string = response_ok_string.encode() + body
+    return response_ok_string
 
-    # TODO: Implement response_ok
-    response_ok_string=f'HTTP/1.1 200 OK\r\nContent-Type:{mimetype.decode()}\r\n\r\n{body.decode()}\r\n'
-    return response_ok_string.encode()
 
 def response_method_not_allowed():
     """Returns a 405 Method Not Allowed response"""
@@ -44,10 +111,11 @@ def parse_request(request):
     NotImplementedError if the method of the request is not GET.
     """
 
-    method,path,version = request.split("\r\n")[0].split(" ")
+    method, path, version = request.split("\r\n")[0].split(" ")
     if method != "GET":
         raise NotImplementedError
     return path
+
 
 def response_path(path):
     """
@@ -76,33 +144,16 @@ def response_path(path):
         response_path('/a_page_that_doesnt_exist.html') -> Raises a NameError
 
     """
-
-    # TODO: Raise a NameError if the requested content is not present
-    # under webroot.
-
-    # TODO: Fill in the appropriate content and mime_type give the path.
-    # See the assignment guidelines for help on "mapping mime-types", though
-    # you might need to create a special case for handling make_time.py
-    #
-    # If the path is "make_time.py", then you may OPTIONALLY return the
-    # result of executing `make_time.py`. But you need only return the
-    # CONTENTS of `make_time.py`.
-    path="webroot"+path
-    path=os.path.abspath(path)
+    path = "webroot" + path
+    path = os.path.abspath(path)
     content = b"not implemented"
     mime_type = b"not implemented"
     if os.path.isdir(path):
-        files=os.listdir(path)
-        content=""
-        for file in files:
-            content=content+f"{file}\n"
-        content=content.encode()
-        mime_type=b"text/plain"
+        return return_directory(path)
     elif os.path.isfile(path):
-        pass
+        return return_file(path)
     else:
         raise NameError
-
     return content, mime_type
 
 
@@ -128,37 +179,22 @@ def server(log_buffer=sys.stderr):
 
                     if '\r\n\r\n' in request:
                         break
-		
 
                 print("Request received:\n{}\n\n".format(request))
-                path=parse_request(request)
-                content,mime_type=response_path(path)
-
-                # TODO: Use response_path to retrieve the content and the mimetype,
-                # based on the request path.
-
-                # TODO; If parse_request raised a NotImplementedError, then let
-                # response be a method_not_allowed response. If response_path raised
-                # a NameError, then let response be a not_found response. Else,
-                # use the content and mimetype from response_path to build a 
-                # response_ok.
-                # response = response_ok(
-                    # body=b"Welcome to my web server",
-                    # mimetype=b"text/plain"
-                # )
-                response=response_ok(body=content,mimetype=mime_type)
-                print(response.decode())
+                path = parse_request(request)
+                content, mime_type = response_path(path)
+                response = response_ok(body=content, mimetype=mime_type)
                 conn.sendall(response)
             except NotImplementedError:
-                response=response_method_not_allowed()
+                response = response_method_not_allowed()
                 conn.sendall(response)
             except NameError:
-                response=response_not_found()
+                response = response_not_found()
                 conn.sendall(response)
             except:
                 traceback.print_exc()
             finally:
-                conn.close() 
+                conn.close()
 
     except KeyboardInterrupt:
         sock.close()
@@ -170,5 +206,3 @@ def server(log_buffer=sys.stderr):
 if __name__ == '__main__':
     server()
     sys.exit(0)
-
-
